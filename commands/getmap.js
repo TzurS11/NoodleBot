@@ -1,50 +1,66 @@
-const { SlashCommandBuilder } = require('@discordjs/builders');
-const BeatSaverAPI = require('beatsaver-api');
-const { channel } = require('diagnostics_channel');
-const { MessageEmbed } = require('discord.js');
-const { getAverageColor } = require('fast-average-color-node');
-
-const api = new BeatSaverAPI({
-	AppName: 'Heck Bot',
-	Version: '2.0.4'
-});
-
-function mapCol(link) {
-	getAverageColor(link).then(color => {
-		console.log("map cover color: ");
-		return color;
-	});
-}
+const { SlashCommandBuilder } = require("@discordjs/builders");
+const { MessageEmbed, MessageActionRow, MessageButton } = require("discord.js");
+const fetch = require("node-fetch"); // npm install node-fetch@2
 
 module.exports = {
-	data: new SlashCommandBuilder()
-		.setName('map')
-		.setDescription('Get info about a map.')
-		.addStringOption(option => option.setName('input').setDescription('Map key')),
-	async execute(interaction) {
-		const value = interaction.options.getString('input');
-		const map = await api.getMapByID(value)
-			.then(map => {
-				return map;
-			})
-			.catch(err => {});
-
-		color = (await getAverageColor(map.versions[0].coverURL).then(color => {return color})).hex;
-		console.log(map);
-		console.log(map.versions[0].diffs)
-		let mapEmbed = new MessageEmbed()
-			.setColor(color)
-			.setTitle(map.metadata.songName)
-			.setAuthor({
-				name: map.uploader.name,
-				iconURL: map.uploader.avatar
-			})
-			.addFields(
-				{ name: 'Links', value: `[Beatsaver](https://beatsaver.com/maps/${value}/)\n[BeastSaber](https://bsaber.com/songs/${value}/)\n[Viewer](https://skystudioapps.com/bs-viewer/?id=${value})\n[Download](${map.versions[map.versions.length - 1].downloadURL})` }
-			)
-			.setDescription(map.description)
-			.setThumbnail('https://i.imgur.com/1dBCcdI.png')
-			.setImage(map.versions[0].coverURL)
-		if (value) interaction.reply({ embeds: [mapEmbed] });
-	},
+  data: new SlashCommandBuilder()
+    .setName("map")
+    .setDescription("Get info about a map.")
+    .addStringOption((option) =>
+      option.setName("input").setDescription("Map key").setRequired(true)
+    ),
+  async execute(interaction) {
+    const code = interaction.options.getString("input");
+    await fetch(`https://api.beatsaver.com/maps/id/${code}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error)
+          return interaction.reply({
+            content: "Map not found.",
+            ephemeral: true,
+          });
+        let BsrEmbed = new MessageEmbed()
+          .setTitle(data.name)
+          .setAuthor({
+            name: data.uploader.name,
+            iconURL: data.uploader.avatar,
+            url: `https://beatsaver.com/profile/${data.uploader.id}`,
+          })
+          .setThumbnail(data.versions[data.versions.length - 1].coverURL)
+          .setURL(`https://beatsaver.com/maps/${code}`)
+          .setDescription(data.description.replace(/\n\n/g, "\n"));
+        let totalReviews = data.stats.upvotes + data.stats.downvotes;
+        let reviewScore = data.stats.upvotes / totalReviews;
+        let rating = Number(
+          (
+            (reviewScore -
+              (reviewScore - 0.5) *
+                Math.pow(2, -Math.log10(totalReviews + 1))) *
+            100
+          ).toFixed(1)
+        );
+        BsrEmbed.addFields({
+          name: "Rating:",
+          value: `${data.stats.upvotes} / ${data.stats.downvotes} (${rating}%)`,
+          inline: true,
+        });
+        if (data.curator) BsrEmbed.setColor("#00BC8C");
+        if (data.ranked == true) BsrEmbed.setColor("#F39C12");
+        let row = new MessageActionRow().addComponents(
+          new MessageButton()
+            .setStyle("Link")
+            .setURL(`https://skystudioapps.com/bs-viewer/?id=${code}`)
+            .setLabel("Preview"),
+          new MessageButton()
+            .setStyle("Link")
+            .setURL(`https://stormpacer.me/beatsaver?id=${code}`)
+            .setLabel("One-Click"),
+          new MessageButton()
+            .setStyle("Link")
+            .setURL(data.versions[data.versions.length - 1].downloadURL)
+            .setLabel("Zip")
+        );
+        return interaction.reply({ embeds: [BsrEmbed], components: [row] });
+      });
+  },
 };
